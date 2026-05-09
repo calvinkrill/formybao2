@@ -438,90 +438,28 @@ export default function App() {
   };
 
   const GalleryPage = () => {
-    const [activeIdx, setActiveIdx] = useState(0);
-    const [zoomedIdx, setZoomedIdx] = useState<number | null>(null);
-
     return (
       <PageTransition>
-        <div className="space-y-6">
-          <h2 className="text-3xl font-serif italic font-bold text-romantic-ink text-center">Our Memories</h2>
-          <div 
-            onClick={() => setZoomedIdx(activeIdx)}
-            className="relative aspect-square sm:aspect-video rounded-[40px] overflow-hidden card-vibrant border-4 border-white/50 group cursor-zoom-in"
+        <div className="min-h-[50vh] flex flex-col items-center justify-center text-center space-y-6">
+          <motion.div
+            animate={{ 
+              rotate: [0, -10, 10, -10, 0],
+              scale: [1, 1.1, 1]
+            }}
+            transition={{ duration: 4, repeat: Infinity }}
+            className="w-24 h-24 bg-romantic-soft rounded-full flex items-center justify-center shadow-lg"
           >
-            <AnimatePresence mode="wait">
-              <motion.img
-                key={activeIdx}
-                src={MEMORIES[activeIdx].image}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="w-full h-full object-cover"
-              />
-            </AnimatePresence>
-            <div className="absolute inset-0 bg-gradient-to-t from-romantic-ink/80 via-transparent to-transparent flex flex-col justify-end p-8 text-white">
-              <p className="text-xl font-serif italic font-medium">{MEMORIES[activeIdx].caption}</p>
-              <p className="text-xs uppercase tracking-widest font-bold opacity-60 mt-1">{MEMORIES[activeIdx].date}</p>
-            </div>
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveIdx(i => (i - 1 + MEMORIES.length) % MEMORIES.length);
-              }}
-              className="absolute left-6 top-1/2 -translate-y-1/2 p-3 bg-white/20 hover:bg-white/40 rounded-full backdrop-blur-md transition-all text-white active:scale-90"
-            >
-              <ChevronLeft className="w-6 h-6"/>
-            </button>
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                setActiveIdx(i => (i + 1) % MEMORIES.length);
-              }}
-              className="absolute right-6 top-1/2 -translate-y-1/2 p-3 bg-white/20 hover:bg-white/40 rounded-full backdrop-blur-md transition-all text-white active:scale-90"
-            >
-              <ChevronRight className="w-6 h-6"/>
-            </button>
+            <Lock className="w-12 h-12 text-white" />
+          </motion.div>
+          <div className="space-y-2">
+            <h2 className="text-3xl font-serif italic font-bold text-romantic-ink text-center">Memories are being kept safe...</h2>
+            <p className="text-romantic-ink/60 max-w-xs mx-auto font-medium">
+              This gallery is currently locked while we capture more beautiful moments together.
+            </p>
           </div>
-          <div className="flex justify-center gap-2">
-            {MEMORIES.map((_, i) => (
-              <button 
-                key={i} 
-                onClick={() => setActiveIdx(i)}
-                className={`h-2 rounded-full transition-all ${i === activeIdx ? 'bg-romantic-accent w-8' : 'bg-romantic-accent/20 w-2'}`}
-              />
-            ))}
+          <div className="pt-4">
+            <p className="text-[10px] uppercase font-bold tracking-[0.3em] text-romantic-accent animate-pulse">Coming Soon ✨</p>
           </div>
-
-          <AnimatePresence>
-            {zoomedIdx !== null && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 z-[60] bg-romantic-ink/90 backdrop-blur-lg flex items-center justify-center p-4 sm:p-10"
-                onClick={() => setZoomedIdx(null)}
-              >
-                <div className="relative max-w-5xl w-full max-h-[90vh] flex flex-col items-center gap-6" onClick={e => e.stopPropagation()}>
-                  <button 
-                    onClick={() => setZoomedIdx(null)}
-                    className="absolute -top-12 right-0 text-white hover:text-romantic-soft transition-colors"
-                  >
-                    <X className="w-8 h-8" />
-                  </button>
-                  <motion.img
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    src={MEMORIES[zoomedIdx].image}
-                    className="w-full h-full object-contain rounded-3xl shadow-2xl border-4 border-white/20"
-                  />
-                  <div className="text-center text-white space-y-2">
-                    <p className="text-3xl font-serif italic font-medium">{MEMORIES[zoomedIdx].caption}</p>
-                    <p className="text-sm uppercase tracking-widest font-bold opacity-60">{MEMORIES[zoomedIdx].date}</p>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
       </PageTransition>
     );
