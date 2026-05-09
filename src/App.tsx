@@ -22,8 +22,23 @@ import {
   Sun,
   X,
   Download,
+  Info,
   Share2,
-  Copy
+  Copy,
+  Plus,
+  Trash2,
+  Edit3,
+  Camera,
+  Calendar,
+  Filter,
+  Search,
+  Mic,
+  Square,
+  Play,
+  Pause,
+  Star,
+  Flower2,
+  RotateCcw,
 } from 'lucide-react';
 import { useNavigate, useLocation, Routes, Route } from 'react-router-dom';
 import { Page, Memory, Song, SecretNote } from './types.ts';
@@ -120,7 +135,16 @@ const Typewriter = ({ text, onComplete }: { text: string; onComplete?: () => voi
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 3000);
+  };
   const [showSplash, setShowSplash] = useState(true);
+  const [memories, setMemories] = useState<Memory[]>(() => {
+    const saved = localStorage.getItem('userMemories');
+    return saved ? JSON.parse(saved) : MEMORIES;
+  });
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('darkMode');
     return saved ? JSON.parse(saved) : false;
@@ -132,6 +156,10 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBtn, setShowInstallBtn] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem('userMemories', JSON.stringify(memories));
+  }, [memories]);
 
   useEffect(() => {
     localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
@@ -223,7 +251,10 @@ export default function App() {
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          onClick={() => setShowSplash(false)}
+          onClick={() => {
+            setShowSplash(false);
+            if (!isMusicPlaying) toggleMusic();
+          }}
           className="group relative px-10 py-4 bg-romantic-accent text-white rounded-full font-bold shadow-xl shadow-romantic-accent/30 overflow-hidden"
         >
           <span className="relative z-10 flex items-center gap-2">
@@ -438,32 +469,509 @@ export default function App() {
   };
 
   const GalleryPage = () => {
+    const [activeIdx, setActiveIdx] = useState(0);
+    const [zoomedIdx, setZoomedIdx] = useState<number | null>(null);
+    const [showUploadModal, setShowUploadModal] = useState(false);
+    const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+    const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
+
+    const startEditing = (memory: Memory) => {
+      setEditingMemoryId(memory.id);
+      setShowUploadModal(true);
+    };
+
+    const handleCloseModal = () => {
+      setShowUploadModal(false);
+      setEditingMemoryId(null);
+    };
+
+    const filteredMemories = memories.filter(m => 
+      m.caption.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      (m.description && m.description.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
+
+    const deleteMemory = (id: string) => {
+      setMemories(memories.filter(m => m.id !== id));
+      setDeleteConfirmId(null);
+      if (activeIdx >= memories.length - 1) setActiveIdx(Math.max(0, memories.length - 2));
+      showToast('Memory deleted successfully');
+    };
+
+    const filters = [
+      { name: 'none', label: 'None' },
+      { name: 'sepia', label: 'Sepia' },
+      { name: 'grayscale', label: 'B&W' },
+      { name: 'saturate-200', label: 'Vivid' },
+      { name: 'brightness-125', label: 'Bright' }
+    ];
+
+    const currentFilterClass = (filterName: string) => {
+      switch (filterName) {
+        case 'sepia': return 'sepia';
+        case 'grayscale': return 'grayscale';
+        case 'saturate-200': return 'saturate-200';
+        case 'brightness-125': return 'brightness-125';
+        default: return '';
+      }
+    };
+
+    function UploadModal() {
+      const [step, setStep] = useState(editingMemoryId ? 2 : 1);
+      const initialMemory = editingMemoryId 
+        ? memories.find(m => m.id === editingMemoryId)! 
+        : { image: '', caption: '', description: '', date: '', filter: 'none', voiceNote: '' };
+      
+      const [newMemory, setNewMemory] = useState(initialMemory);
+      const [previewImage, setPreviewImage] = useState<string | null>(editingMemoryId ? initialMemory.image : null);
+      const [isRecording, setIsRecording] = useState(false);
+      const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+      const [recordingTime, setRecordingTime] = useState(0);
+      const timerRef = useRef<any>(null);
+
+      const startRecording = async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const recorder = new MediaRecorder(stream);
+          const chunks: Blob[] = [];
+
+          recorder.ondataavailable = (e) => chunks.push(e.data);
+          recorder.onstop = () => {
+            const blob = new Blob(chunks, { type: 'audio/webm' });
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              setNewMemory(prev => ({ ...prev, voiceNote: reader.result as string }));
+            };
+            reader.readAsDataURL(blob);
+            stream.getTracks().forEach(track => track.stop());
+          };
+
+          recorder.start();
+          setMediaRecorder(recorder);
+          setIsRecording(true);
+          setRecordingTime(0);
+          timerRef.current = setInterval(() => {
+            setRecordingTime(prev => prev + 1);
+          }, 1000);
+        } catch (err) {
+          console.error('Recording error:', err);
+          showToast('Microphone access denied');
+        }
+      };
+
+      const stopRecording = () => {
+        if (mediaRecorder) {
+          mediaRecorder.stop();
+          setIsRecording(false);
+          clearInterval(timerRef.current);
+        }
+      };
+
+      const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        // Validation
+        if (!file.type.startsWith('image/')) {
+          showToast('Please select an image file 🖼️');
+          return;
+        }
+
+        if (file.size > 5 * 1024 * 1024) { // 5MB limit
+          showToast('Image is too large. Max 5MB please!');
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setPreviewImage(reader.result as string);
+          setNewMemory(prev => ({ ...prev, image: reader.result as string }));
+          setStep(2);
+        };
+        reader.onerror = () => {
+          showToast('Failed to read image. Try another one?');
+        };
+        reader.readAsDataURL(file);
+      };
+
+      const saveMemoryAction = () => {
+        if (newMemory.image && newMemory.caption && newMemory.date) {
+          if (editingMemoryId) {
+            setMemories(memories.map(m => m.id === editingMemoryId ? { ...newMemory, id: editingMemoryId } : m));
+            showToast('Memory updated! ✨');
+          } else {
+            const memoryToAdd: Memory = {
+              id: Date.now().toString(),
+              ...newMemory
+            };
+            setMemories([memoryToAdd, ...memories]);
+            showToast('Memory saved beautifully! ✨');
+          }
+          handleCloseModal();
+        }
+      };
+
+      return (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-romantic-ink/40 backdrop-blur-md"
+          onClick={handleCloseModal}
+        >
+          <motion.div
+            initial={{ scale: 0.9, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            className="bg-white glass p-8 rounded-[40px] max-w-md w-full relative shadow-2xl border-2 border-white max-h-[90vh] overflow-y-auto no-scrollbar"
+            onClick={e => e.stopPropagation()}
+          >
+            <button onClick={handleCloseModal} className="absolute top-6 right-6 p-2 hover:bg-romantic-soft/20 rounded-full transition-colors"><X/></button>
+            
+            <h3 className="text-2xl font-serif italic font-bold text-romantic-ink mb-6">
+              {editingMemoryId ? 'Edit Memory' : 'Add New Memory'}
+            </h3>
+            
+            <div className="space-y-6">
+              {step === 1 ? (
+                <div className="flex flex-col items-center justify-center py-10 border-2 border-dashed border-romantic-border rounded-3xl bg-romantic-bg/30">
+                  <Camera className="w-12 h-12 text-romantic-accent mb-4 opacity-50" />
+                  <p className="text-sm font-medium text-romantic-ink/60 mb-6 text-center px-6">Choose a photo that makes you smile</p>
+                  <label className="btn-vibrant cursor-pointer">
+                    Choose Photo
+                    <input type="file" accept="image/*" className="hidden" onChange={handleUpload} />
+                  </label>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="aspect-video rounded-2xl overflow-hidden shadow-inner border-2 border-white">
+                    <img src={previewImage!} className={`w-full h-full object-cover ${currentFilterClass(newMemory.filter)}`} />
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+                      {filters.map(f => (
+                        <button
+                          key={f.name}
+                          onClick={() => setNewMemory(prev => ({ ...prev, filter: f.name }))}
+                          className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold transition-all ${newMemory.filter === f.name ? 'bg-romantic-accent text-white shadow-md' : 'bg-romantic-bg text-romantic-ink/60 hover:bg-romantic-warm/30'}`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        placeholder="Say something sweet about this..." 
+                        className="w-full px-5 py-4 rounded-2xl bg-romantic-bg border-none outline-none font-medium italic text-romantic-ink placeholder:text-romantic-ink/30 focus:shadow-md transition-all pt-10"
+                        value={newMemory.caption}
+                        onChange={e => setNewMemory(prev => ({ ...prev, caption: e.target.value }))}
+                      />
+                      <span className="absolute top-4 left-5 text-[10px] uppercase font-bold tracking-widest text-romantic-accent opacity-50">Caption</span>
+                    </div>
+
+                    <div className="relative">
+                      <textarea 
+                        placeholder="Memory details..." 
+                        className="w-full px-5 py-4 rounded-2xl bg-romantic-bg border-none outline-none font-medium text-romantic-ink placeholder:text-romantic-ink/30 focus:shadow-md transition-all pt-10 min-h-[100px] resize-none"
+                        value={newMemory.description}
+                        onChange={e => setNewMemory(prev => ({ ...prev, description: e.target.value }))}
+                      />
+                      <span className="absolute top-4 left-5 text-[10px] uppercase font-bold tracking-widest text-romantic-accent opacity-50">Detailed Description</span>
+                    </div>
+
+                    <div className="relative">
+                      <input 
+                        type="date" 
+                        className="w-full px-5 py-4 rounded-2xl bg-romantic-bg border-none outline-none font-bold text-romantic-ink focus:shadow-md transition-all pt-10"
+                        value={newMemory.date}
+                        onChange={e => setNewMemory(prev => ({ ...prev, date: e.target.value }))}
+                      />
+                      <span className="absolute top-4 left-5 text-[10px] uppercase font-bold tracking-widest text-romantic-accent opacity-50">Memory Date</span>
+                    </div>
+
+                    <div className="bg-romantic-bg/30 p-5 rounded-2xl border-2 border-white/50 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase font-bold tracking-widest text-romantic-accent opacity-50">Voice Note</span>
+                        {isRecording && (
+                          <div className="flex items-center gap-2">
+                             <div className="w-2 h-2 bg-red-500 rounded-full animate-ping" />
+                             <span className="text-xs font-mono font-bold text-red-500">{Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}</span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {!isRecording ? (
+                        <button 
+                          onClick={startRecording}
+                          type="button"
+                          className="w-full py-3 bg-white hover:bg-romantic-soft/10 text-romantic-accent rounded-xl font-bold flex items-center justify-center gap-2 transition-all border-2 border-romantic-accent/20"
+                        >
+                          <Mic className="w-4 h-4"/> 
+                          {newMemory.voiceNote ? 'Re-record Voice Note' : 'Record Voice Note'}
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={stopRecording}
+                          type="button"
+                          className="w-full py-3 bg-red-500 text-white rounded-xl font-bold flex items-center justify-center gap-2 animate-pulse"
+                        >
+                          <Square className="w-4 h-4 fill-current"/> Stop Recording
+                        </button>
+                      )}
+
+                      {newMemory.voiceNote && !isRecording && (
+                        <div className="flex items-center gap-3 p-3 bg-white/50 rounded-xl">
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              const audio = new Audio(newMemory.voiceNote);
+                              audio.play();
+                            }}
+                            className="p-2 bg-romantic-accent text-white rounded-full transition-transform active:scale-95"
+                          >
+                            <Play className="w-4 h-4 fill-current"/>
+                          </button>
+                          <span className="text-xs text-romantic-ink/60 italic">Voice note recorded</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <button 
+                      onClick={saveMemoryAction}
+                      disabled={!newMemory.caption || !newMemory.date}
+                      className="w-full py-4 bg-romantic-accent text-white rounded-2xl font-bold shadow-lg shadow-romantic-accent/20 active:scale-95 transition-all disabled:opacity-50 disabled:pointer-events-none"
+                    >
+                      Save Memory ✨
+                    </button>
+                    <button 
+                      onClick={() => setStep(1)}
+                      className="w-full py-2 text-xs font-bold uppercase tracking-widest text-romantic-ink/40 hover:text-romantic-accent transition-colors"
+                    >
+                      Change Photo
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
+      );
+    }
+
+    if (memories.length === 0) {
+      return (
+        <PageTransition>
+          <div className="flex flex-col items-center justify-center space-y-6 pt-10 text-center">
+            <div className="w-20 h-20 bg-romantic-soft/20 rounded-full flex items-center justify-center">
+              <ImageIcon className="w-10 h-10 text-romantic-accent opacity-40" />
+            </div>
+            <p className="text-romantic-ink/60 font-medium italic">No memories yet. Add your first one!</p>
+            <button 
+              onClick={() => setShowUploadModal(true)}
+              className="btn-vibrant flex items-center gap-2"
+            >
+              <Plus className="w-5 h-5"/> Add Memory
+            </button>
+            {/* Modal placeholder logic below */}
+          </div>
+          {showUploadModal && <UploadModal />}
+        </PageTransition>
+      );
+    }
+
     return (
       <PageTransition>
-        <div className="min-h-[50vh] flex flex-col items-center justify-center text-center space-y-6">
-          <motion.div
-            animate={{ 
-              rotate: [0, -10, 10, -10, 0],
-              scale: [1, 1.1, 1]
-            }}
-            transition={{ duration: 4, repeat: Infinity }}
-            className="w-24 h-24 bg-romantic-soft rounded-full flex items-center justify-center shadow-lg"
-          >
-            <Lock className="w-12 h-12 text-white" />
-          </motion.div>
-          <div className="space-y-2">
-            <h2 className="text-3xl font-serif italic font-bold text-romantic-ink text-center">Memories are being kept safe...</h2>
-            <p className="text-romantic-ink/60 max-w-xs mx-auto font-medium">
-              This gallery is currently locked while we capture more beautiful moments together.
-            </p>
+        <div className="space-y-6">
+          <div className="px-4 space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-3xl font-serif italic font-bold text-romantic-ink">Our Memories</h2>
+              <button 
+                onClick={() => setShowUploadModal(true)}
+                className="p-3 bg-romantic-accent text-white rounded-2xl shadow-lg active:scale-95 transition-all"
+              >
+                <Plus className="w-6 h-6"/>
+              </button>
+            </div>
+
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-romantic-ink/30" />
+              <input 
+                type="text" 
+                placeholder="Search memories..." 
+                aria-label="Search memories"
+                className="w-full pl-11 pr-4 py-3 rounded-2xl bg-white border-2 border-romantic-border/30 outline-none focus:border-romantic-accent/40 focus:shadow-md transition-all font-medium text-romantic-ink"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
+            </div>
           </div>
-          <div className="pt-4">
-            <p className="text-[10px] uppercase font-bold tracking-[0.3em] text-romantic-accent animate-pulse">Coming Soon ✨</p>
-          </div>
+
+          {filteredMemories.length === 0 ? (
+            <div className="py-20 text-center space-y-4">
+              <div className="w-16 h-16 bg-romantic-bg rounded-full flex items-center justify-center mx-auto opacity-50">
+                <Search className="w-6 h-6 text-romantic-ink/40" />
+              </div>
+              <p className="text-romantic-ink/60 font-medium italic">No memories found for "{searchQuery}"</p>
+            </div>
+          ) : (
+            <>
+              <div className="relative aspect-square sm:aspect-video rounded-[40px] overflow-hidden card-vibrant border-4 border-white/50 group">
+                <AnimatePresence mode="wait">
+                  <motion.img
+                    key={filteredMemories[activeIdx % filteredMemories.length]?.id}
+                    src={filteredMemories[activeIdx % filteredMemories.length]?.image}
+                    onClick={() => setZoomedIdx(memories.findIndex(m => m.id === filteredMemories[activeIdx % filteredMemories.length].id))}
+                    initial={{ opacity: 0, scale: 1.1 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    alt={filteredMemories[activeIdx % filteredMemories.length]?.caption}
+                    className={`w-full h-full object-cover transition-all cursor-zoom-in ${currentFilterClass(filteredMemories[activeIdx % filteredMemories.length]?.filter || 'none')}`}
+                  />
+                </AnimatePresence>
+                
+                <div className="absolute inset-0 bg-gradient-to-t from-romantic-ink/80 via-transparent to-transparent flex flex-col justify-end p-8 text-white pointer-events-none">
+                  <p className="text-xl font-serif italic font-medium">{filteredMemories[activeIdx % filteredMemories.length]?.caption}</p>
+                  <p className="text-xs uppercase tracking-widest font-bold opacity-60 mt-1">{filteredMemories[activeIdx % filteredMemories.length]?.date}</p>
+                </div>
+
+                <button 
+                  onClick={() => setActiveIdx(i => (i - 1 + filteredMemories.length) % filteredMemories.length)}
+                  aria-label="Previous memory"
+                  className="absolute left-6 top-1/2 -translate-y-1/2 p-3 bg-white/20 hover:bg-white/40 rounded-full backdrop-blur-md transition-all text-white active:scale-90 focus:outline-none focus:ring-2 focus:ring-white"
+                >
+                  <ChevronLeft className="w-6 h-6"/>
+                </button>
+                <button 
+                  onClick={() => setActiveIdx(i => (i + 1) % filteredMemories.length)}
+                  aria-label="Next memory"
+                  className="absolute right-6 top-1/2 -translate-y-1/2 p-3 bg-white/20 hover:bg-white/40 rounded-full backdrop-blur-md transition-all text-white active:scale-90 focus:outline-none focus:ring-2 focus:ring-white"
+                >
+                  <ChevronRight className="w-6 h-6"/>
+                </button>
+
+                <button 
+                  onClick={() => setDeleteConfirmId(filteredMemories[activeIdx % filteredMemories.length].id)}
+                  aria-label="Delete memory"
+                  className="absolute top-6 right-6 p-3 bg-red-500/80 hover:bg-red-600 rounded-full text-white backdrop-blur-lg opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+                >
+                  <Trash2 className="w-5 h-5"/>
+                </button>
+
+                <button 
+                  onClick={() => startEditing(filteredMemories[activeIdx % filteredMemories.length])}
+                  aria-label="Edit memory"
+                  className="absolute top-6 right-20 p-3 bg-white/80 hover:bg-white rounded-full text-romantic-ink backdrop-blur-lg opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-romantic-accent"
+                >
+                  <Edit3 className="w-5 h-5"/>
+                </button>
+              </div>
+
+              <div className="flex justify-center gap-2 pb-4 overflow-x-auto no-scrollbar max-w-full">
+                {filteredMemories.map((m, i) => (
+                  <button 
+                    key={m.id} 
+                    onClick={() => setActiveIdx(i)}
+                    className={`flex-shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all ${i === activeIdx ? 'border-romantic-accent scale-110 shadow-lg' : 'border-transparent opacity-50 hover:opacity-100'}`}
+                  >
+                    <img src={m.image} className={`w-full h-full object-cover ${currentFilterClass(m.filter || 'none')}`} />
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          <AnimatePresence>
+            {zoomedIdx !== null && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[60] bg-romantic-ink/90 backdrop-blur-lg flex items-center justify-center p-4 sm:p-10"
+                onClick={() => setZoomedIdx(null)}
+              >
+                <div className="relative max-w-5xl w-full max-h-[90vh] flex flex-col items-center gap-6 overflow-y-auto no-scrollbar" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => setZoomedIdx(null)} className="absolute -top-12 right-0 text-white hover:text-romantic-soft transition-colors"><X className="w-8 h-8" /></button>
+                  <img src={memories[zoomedIdx].image} className={`w-full rounded-3xl shadow-2xl border-4 border-white/20 max-h-[60vh] object-contain ${currentFilterClass(memories[zoomedIdx].filter || 'none')}`} />
+                  
+                  <div className="text-center text-white space-y-4 max-w-2xl px-4 pb-10">
+                    <div>
+                      <p className="text-3xl font-serif italic font-medium">{memories[zoomedIdx].caption}</p>
+                      <p className="text-sm uppercase tracking-widest font-bold opacity-60 mt-1">{memories[zoomedIdx].date}</p>
+                    </div>
+
+                    {memories[zoomedIdx].voiceNote && (
+                      <div className="flex justify-center pt-2">
+                        <button 
+                          onClick={() => {
+                            const audio = new Audio(memories[zoomedIdx!].voiceNote);
+                            audio.play();
+                          }}
+                          className="flex items-center gap-3 px-6 py-3 bg-white/20 hover:bg-white/30 rounded-full backdrop-blur-md border border-white/30 transition-all font-bold text-sm active:scale-95 group"
+                        >
+                          <div className="w-8 h-8 bg-romantic-accent rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <Play className="w-4 h-4 fill-white text-white ml-0.5" />
+                          </div>
+                          Play Voice Note
+                        </button>
+                      </div>
+                    )}
+
+                    {memories[zoomedIdx].description && (
+                      <div className="relative pt-4">
+                        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-0.5 bg-white/20" />
+                        <p className="text-lg italic opacity-80 leading-relaxed font-light py-4">
+                          {memories[zoomedIdx].description}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {showUploadModal && <UploadModal />}
+
+            {deleteConfirmId && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[70] bg-romantic-ink/40 backdrop-blur-md flex items-center justify-center p-6"
+                onClick={() => setDeleteConfirmId(null)}
+              >
+                <div className="bg-white p-8 rounded-[30px] border-2 border-white shadow-2xl max-w-sm w-full text-center space-y-6" onClick={e => e.stopPropagation()}>
+                  <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto text-red-500">
+                    <Trash2 className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-bold text-romantic-ink">Delete Memory?</h3>
+                    <p className="text-romantic-ink/60 italic">This memory will be lost forever. Are you sure?</p>
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <button 
+                      onClick={() => setDeleteConfirmId(null)}
+                      className="flex-1 py-3 bg-romantic-bg hover:bg-romantic-warm/30 text-romantic-ink rounded-2xl font-bold transition-all"
+                    >
+                      Wait, no!
+                    </button>
+                    <button 
+                      onClick={() => deleteMemory(deleteConfirmId)}
+                      className="flex-1 py-3 bg-red-500 hover:bg-red-600 text-white rounded-2xl font-bold shadow-lg shadow-red-500/20 transition-all"
+                    >
+                      Yes, delete
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </PageTransition>
     );
   };
+
 
   const MusicPage = () => {
     const [selectedSongNote, setSelectedSongNote] = useState<Song | null>(null);
@@ -490,7 +998,8 @@ export default function App() {
                 <div className="flex items-center gap-3">
                   <button 
                     onClick={() => setSelectedSongNote(song)}
-                    className="p-2 hover:bg-romantic-soft/10 rounded-full transition-colors text-romantic-accent"
+                    aria-label={`View note for ${song.title}`}
+                    className="p-2 hover:bg-romantic-soft/10 rounded-full transition-colors text-romantic-accent focus:outline-none focus:ring-2 focus:ring-romantic-accent"
                   >
                     <Sparkles className="w-4 h-4" />
                   </button>
@@ -574,7 +1083,8 @@ export default function App() {
               <button
                 key={note.id}
                 onClick={() => setSelectedNote(note)}
-                className="p-8 glass rounded-[40px] flex flex-col items-center text-center space-y-4 hover:scale-105 transition-all group border-romantic-border"
+                aria-label={`Open ${note.label}`}
+                className="p-8 glass rounded-[40px] flex flex-col items-center text-center space-y-4 hover:scale-105 transition-all group border-romantic-border focus:outline-none focus:ring-2 focus:ring-romantic-accent"
               >
                 <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-sm group-hover:bg-romantic-soft group-hover:text-white transition-all text-2xl">
                   🎁
@@ -714,69 +1224,391 @@ export default function App() {
   };
 
   const MiniGamePage = () => {
+    const GRID_SIZE = 6;
+    const INITIAL_TIME = 30;
+    const CANDIES = [
+      { icon: Heart, color: 'text-romantic-accent', fill: '#FF85A1', id: 'heart' },
+      { icon: Star, color: 'text-yellow-400', fill: '#FACC15', id: 'star' },
+      { icon: Sparkles, color: 'text-purple-400', id: 'sparkles' },
+      { icon: Smile, color: 'text-orange-400', id: 'smile' },
+      { icon: Flower2, color: 'text-green-400', id: 'flower' }
+    ];
+
+    const [gameState, setGameState] = useState<'idle' | 'playing' | 'ended'>('idle');
+    const [grid, setGrid] = useState<any[]>([]);
     const [score, setScore] = useState(0);
-    const [hearts, setHearts] = useState<{ id: number; x: number; isCaught?: boolean; isMissed?: boolean }[]>([]);
+    const [highScore, setHighScore] = useState(() => Number(localStorage.getItem('matchGameHighScore') || 0));
+    const [timeLeft, setTimeLeft] = useState(INITIAL_TIME);
+    const [selectedId, setSelectedId] = useState<number | null>(null);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [combo, setCombo] = useState(1);
+    const [showCombo, setShowCombo] = useState(false);
+    const [level, setLevel] = useState(1);
+    const [timeAdded, setTimeAdded] = useState<{ id: number; amount: number } | null>(null);
+
+    const createGrid = () => {
+      const newGrid = [];
+      for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+        const randomCandy = CANDIES[Math.floor(Math.random() * CANDIES.length)];
+        newGrid.push({ ...randomCandy, gridId: Math.random() });
+      }
+      setGrid(newGrid);
+      setScore(0);
+      setCombo(1);
+      setLevel(1);
+      setTimeLeft(INITIAL_TIME);
+    };
 
     useEffect(() => {
-      const interval = setInterval(() => {
-        setHearts(prev => [...prev, { id: Date.now(), x: Math.random() * 80 + 10 }]);
-      }, 1000);
-      return () => clearInterval(interval);
-    }, []);
+      if (gameState === 'playing' && grid.length === 0) {
+        createGrid();
+      }
+    }, [gameState]);
 
-    const onFinish = (id: number, caught: boolean) => {
-      setHearts(prev => prev.filter(p => p.id !== id));
+    useEffect(() => {
+      if (gameState !== 'playing') return;
+
+      const timerIdx = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            setGameState('ended');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => clearInterval(timerIdx);
+    }, [gameState]);
+
+    useEffect(() => {
+      if (gameState === 'ended' && score > highScore) {
+        setHighScore(score);
+        localStorage.setItem('matchGameHighScore', score.toString());
+        showToast('New High Score! 🏆');
+      }
+    }, [gameState, score, highScore]);
+
+    // Difficulty scaling
+    useEffect(() => {
+      const nextLevel = Math.floor(score / 500) + 1;
+      if (nextLevel > level) {
+        setLevel(nextLevel);
+        showToast(`Level Up! Difficulty Increased 🚀`);
+      }
+    }, [score, level]);
+
+    const checkMatches = (currentGrid: any[]) => {
+      if (!currentGrid || currentGrid.length === 0) return [];
+      const matches = new Set<number>();
+
+      // Horizontal
+      for (let row = 0; row < GRID_SIZE; row++) {
+        let matchLength = 1;
+        for (let col = 0; col < GRID_SIZE; col++) {
+          const idx = row * GRID_SIZE + col;
+          const nextIdx = idx + 1;
+          
+          if (col < GRID_SIZE - 1 && currentGrid[idx].id === currentGrid[nextIdx].id) {
+            matchLength++;
+          } else {
+            if (matchLength >= 3) {
+              for (let i = 0; i < matchLength; i++) {
+                matches.add(idx - i);
+              }
+            }
+            matchLength = 1;
+          }
+        }
+      }
+
+      // Vertical
+      for (let col = 0; col < GRID_SIZE; col++) {
+        let matchLength = 1;
+        for (let row = 0; row < GRID_SIZE; row++) {
+          const idx = row * GRID_SIZE + col;
+          const nextIdx = (row + 1) * GRID_SIZE + col;
+          
+          if (row < GRID_SIZE - 1 && currentGrid[idx].id === currentGrid[nextIdx].id) {
+            matchLength++;
+          } else {
+            if (matchLength >= 3) {
+              for (let i = 0; i < matchLength; i++) {
+                matches.add(idx - i * GRID_SIZE);
+              }
+            }
+            matchLength = 1;
+          }
+        }
+      }
+
+      return Array.from(matches);
+    };
+
+    const processMatches = async (currentGrid: any[], currentCombo: number = 1) => {
+      const matchedIndices = checkMatches(currentGrid);
+      if (matchedIndices.length === 0) {
+        setIsProcessing(false);
+        setCombo(1);
+        return;
+      }
+
+      setIsProcessing(true);
+      setCombo(currentCombo);
+      if (currentCombo > 1) {
+        setShowCombo(true);
+        setTimeout(() => setShowCombo(false), 800);
+      }
+
+      const basePoints = matchedIndices.length * 10;
+      const countBonus = matchedIndices.length > 3 ? (matchedIndices.length - 3) * 15 : 0;
+      const totalPointsAdded = (basePoints + countBonus) * currentCombo;
+      
+      // Calculate time bonus: level reduces bonus, combo increases it
+      const timeBonus = Math.max(1, Math.floor((matchedIndices.length * 0.5 * currentCombo) / (level * 0.5)));
+      
+      setScore(s => s + totalPointsAdded);
+      setTimeLeft(prev => Math.min(60, prev + timeBonus));
+      setTimeAdded({ id: Date.now(), amount: timeBonus });
+      setTimeout(() => setTimeAdded(null), 1000);
+
+      // Clear matches
+      const newGrid = [...currentGrid];
+      matchedIndices.forEach(idx => {
+        newGrid[idx] = { ...newGrid[idx], cleared: true };
+      });
+      setGrid([...newGrid]);
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Drop down
+      for (let col = 0; col < GRID_SIZE; col++) {
+        let emptySpaces = 0;
+        for (let row = GRID_SIZE - 1; row >= 0; row--) {
+          const idx = row * GRID_SIZE + col;
+          if (newGrid[idx].cleared) {
+            emptySpaces++;
+          } else if (emptySpaces > 0) {
+            newGrid[idx + emptySpaces * GRID_SIZE] = newGrid[idx];
+            newGrid[idx] = { cleared: true };
+          }
+        }
+        
+        // Fill top
+        for (let i = 0; i < emptySpaces; i++) {
+          const randomCandy = CANDIES[Math.floor(Math.random() * CANDIES.length)];
+          newGrid[i * GRID_SIZE + col] = { ...randomCandy, gridId: Math.random() };
+        }
+      }
+
+      const finalGrid = newGrid.map(c => ({ ...c, cleared: false }));
+      setGrid(finalGrid);
+      
+      setTimeout(() => processMatches(finalGrid, currentCombo + 1), 300);
+    };
+
+    const handleCellClick = async (idx: number) => {
+      if (isProcessing || gameState !== 'playing') return;
+
+      if (selectedId === null) {
+        setSelectedId(idx);
+      } else {
+        const diff = Math.abs(selectedId - idx);
+        const isAdjacent = (diff === 1 && Math.floor(selectedId / GRID_SIZE) === Math.floor(idx / GRID_SIZE)) || diff === GRID_SIZE;
+
+        if (isAdjacent) {
+          const newGrid = [...grid];
+          const temp = newGrid[selectedId];
+          newGrid[selectedId] = newGrid[idx];
+          newGrid[idx] = temp;
+          
+          setGrid(newGrid);
+          setSelectedId(null);
+          
+          const matches = checkMatches(newGrid);
+          if (matches.length > 0) {
+            processMatches(newGrid);
+          } else {
+            setTimeout(() => {
+              const revertGrid = [...newGrid];
+              const t = revertGrid[selectedId];
+              revertGrid[selectedId] = revertGrid[idx];
+              revertGrid[idx] = t;
+              setGrid(revertGrid);
+              showToast('No match! Try another one? 🙊');
+            }, 300);
+          }
+        } else {
+          setSelectedId(idx);
+        }
+      }
+    };
+
+    const startGame = () => {
+      createGrid();
+      setGameState('playing');
     };
 
     return (
       <PageTransition>
-        <div className="space-y-6 text-center">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-3xl font-serif italic font-bold">Catch My Love</h2>
-            <div className="bg-romantic-accent text-white px-6 py-2 rounded-full font-bold shadow-lg shadow-romantic-accent/20">Score: {score}</div>
-          </div>
-          <div className="relative h-[60vh] glass rounded-[40px] overflow-hidden border-4 border-white bg-gradient-to-br from-romantic-box/40 to-romantic-lavender/40 shadow-inner">
-            <AnimatePresence>
-              {hearts.map(h => (
-                <motion.button
-                  key={h.id}
-                  initial={{ y: -50, x: `${h.x}%`, scale: 0, opacity: 1 }}
-                  animate={h.isCaught ? { scale: 2, opacity: 0, rotate: 15 } : { y: '70vh', scale: 1 }}
-                  exit={{ opacity: 0, scale: 0 }}
-                  transition={{ duration: h.isCaught ? 0.3 : 3, ease: h.isCaught ? 'easeOut' : 'linear' }}
-                  onClick={() => {
-                    if (!h.isCaught) {
-                      setScore(s => s + 1);
-                      setHearts(prev => prev.map(p => p.id === h.id ? { ...p, isCaught: true } : p));
-                    }
-                  }}
-                  onAnimationComplete={() => onFinish(h.id, !!h.isCaught)}
-                  className={`absolute text-romantic-accent drop-shadow-lg transition-transform ${h.isCaught ? 'pointer-events-none' : 'hover:scale-125'}`}
-                >
-                  {h.isCaught ? (
-                    <div className="relative">
-                      <Heart fill="currentColor" className="w-10 h-10" />
-                      <motion.span 
-                        initial={{ opacity: 0, y: 0 }}
-                        animate={{ opacity: 1, y: -40 }}
-                        className="absolute top-0 left-0 right-0 font-bold text-xs whitespace-nowrap"
-                      >
-                        GOT IT! ✨
-                      </motion.span>
-                    </div>
-                  ) : (
-                    <Heart fill="currentColor" className="w-10 h-10" />
+        <div className="space-y-6 max-w-lg mx-auto text-center px-4">
+          <div className="flex justify-between items-end">
+            <div className="text-left">
+              <h2 className="text-3xl font-serif italic font-bold text-romantic-ink">Sweet Bao Match</h2>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-[10px] bg-romantic-accent/10 md:px-2 py-0.5 rounded-full font-bold text-romantic-accent uppercase tracking-widest border border-romantic-accent/20">
+                  Level {level}
+                </span>
+                <p className="text-xs font-bold text-romantic-ink/40 uppercase tracking-widest">Record: {highScore}</p>
+              </div>
+            </div>
+            
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <AnimatePresence>
+                  {timeAdded && (
+                    <motion.div 
+                      key={timeAdded.id}
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                      className="text-green-500 font-bold text-xs"
+                    >
+                      +{timeAdded.amount}s
+                    </motion.div>
                   )}
+                </AnimatePresence>
+                <div className={`px-4 py-1.5 rounded-2xl font-mono font-bold shadow-sm transition-colors ${timeLeft < 10 ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-romantic-ink'}`}>
+                  {timeLeft}s
+                </div>
+              </div>
+              <div className="bg-romantic-accent text-white px-6 py-2 rounded-2xl font-bold shadow-lg shadow-romantic-accent/20 flex items-center gap-2">
+                <Sparkles size={16} />
+                <span className="tabular-nums">{score}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white/40 p-3 rounded-[40px] border-4 border-white shadow-xl backdrop-blur-sm relative overflow-hidden">
+            <AnimatePresence>
+              {gameState === 'idle' && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-20 bg-white/60 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center"
+                >
+                  <div className="w-20 h-20 bg-romantic-soft rounded-full flex items-center justify-center mb-4 shadow-lg">
+                    <Heart fill="white" className="w-10 h-10 text-white animate-bounce" />
+                  </div>
+                  <h3 className="text-2xl font-serif italic font-bold text-romantic-ink mb-2">Match the Sweets!</h3>
+                  <p className="text-sm text-romantic-ink/60 mb-6 max-w-xs italic line-clamp-3">
+                    Bao2, match 3 or more sweet icons to gain love points and extra time! How long can you keep the love going?
+                  </p>
+                  <button 
+                    onClick={startGame}
+                    className="w-full max-w-[200px] py-4 bg-romantic-accent text-white rounded-2xl font-bold shadow-xl shadow-romantic-accent/20 hover:scale-105 active:scale-95 transition-all"
+                  >
+                    Start Playing
+                  </button>
+                </motion.div>
+              )}
+
+              {gameState === 'ended' && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="absolute inset-0 z-[30] bg-romantic-ink/90 backdrop-blur-lg flex flex-col items-center justify-center p-8 text-center text-white"
+                >
+                  <div className="text-5xl mb-4">🍯</div>
+                  <h3 className="text-3xl font-serif italic font-bold mb-2">Sweet Time's Up!</h3>
+                  <div className="space-y-1 mb-8">
+                    <p className="text-white/40 uppercase tracking-widest text-xs font-bold">Your Love Score</p>
+                    <p className="text-6xl font-bold text-romantic-soft">{score}</p>
+                    <p className="text-xs text-white/60">Reached Level {level}</p>
+                  </div>
+                  <div className="flex gap-4 w-full max-w-xs">
+                    <button 
+                      onClick={startGame}
+                      className="flex-1 py-4 bg-white text-romantic-ink rounded-2xl font-bold hover:bg-white/90 transition-all active:scale-95"
+                    >
+                      Retry
+                    </button>
+                    <button 
+                      onClick={() => navigate('/')}
+                      className="flex-1 py-4 bg-white/10 text-white border-2 border-white/20 rounded-2xl font-bold hover:bg-white/5 transition-all active:scale-95"
+                    >
+                      Exit
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div 
+              className="grid gap-2" 
+              style={{ gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)` }}
+            >
+              {grid.map((candy, i) => (
+                <motion.button
+                  key={candy.gridId}
+                  layout
+                  initial={{ scale: 0 }}
+                  animate={{ 
+                    scale: candy.cleared ? 0 : 1,
+                    rotate: candy.cleared ? 90 : 0
+                  }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => handleCellClick(i)}
+                  className={`aspect-square rounded-2xl flex items-center justify-center transition-all relative ${
+                    selectedId === i 
+                      ? 'bg-romantic-accent/20 ring-4 ring-romantic-accent ring-inset' 
+                      : 'bg-white/60 hover:bg-white shadow-sm'
+                  } ${candy.cleared ? 'opacity-0' : 'opacity-100'}`}
+                >
+                  <candy.icon 
+                    className={`w-2/3 h-2/3 ${candy.color}`} 
+                    fill={candy.fill || 'none'} 
+                  />
                 </motion.button>
               ))}
+            </div>
+            
+            <AnimatePresence>
+              {showCombo && combo > 1 && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.5, y: -20 }}
+                  animate={{ opacity: 1, scale: 1.2, y: -40 }}
+                  exit={{ opacity: 0, y: -60 }}
+                  className="absolute bottom-12 left-0 right-0 pointer-events-none"
+                >
+                  <span className="px-6 py-2 bg-romantic-accent text-white rounded-full text-lg font-black italic shadow-2xl shadow-romantic-accent/40 ring-4 ring-white">
+                    {combo}x COMBO! 💖
+                  </span>
+                </motion.div>
+              )}
             </AnimatePresence>
-            {score === 0 && (
-              <div className="absolute inset-0 flex items-center justify-center text-romantic-ink/40 font-bold uppercase tracking-widest text-sm">
-                Catch as many as you can!
-              </div>
-            )}
           </div>
-          <p className="text-sm italic text-romantic-ink/60 font-medium">Every heart caught is a message I'm sending you...</p>
+
+          <div className="flex gap-4">
+            <button 
+              onClick={createGrid}
+              className="flex-1 py-4 bg-white text-romantic-ink rounded-3xl font-bold border-2 border-white/50 shadow-lg hover:bg-romantic-soft/20 transition-all active:scale-95 flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="w-5 h-5"/> Reset Grid
+            </button>
+            <button 
+              onClick={() => showToast('Match 3 to earn points and TIME! 🍬')}
+              className="px-6 py-4 bg-romantic-accent text-white rounded-3xl font-bold shadow-xl shadow-romantic-accent/20 transition-all active:scale-95"
+            >
+              <Info className="w-5 h-5"/>
+            </button>
+          </div>
+          
+          <p className="text-[10px] text-romantic-ink/40 font-bold uppercase tracking-[0.2em] animate-pulse">
+            {gameState === 'playing' ? `Difficulty Level ${level} in effect` : "Sweet Bao Match 2.0"}
+          </p>
         </div>
       </PageTransition>
     );
@@ -812,6 +1644,67 @@ export default function App() {
     </PageTransition>
   );
 
+  const AboutPage = () => (
+    <PageTransition>
+      <div className="space-y-8 max-w-lg mx-auto">
+        <div className="text-center space-y-4">
+          <div className="w-20 h-20 bg-romantic-soft rounded-full flex items-center justify-center mx-auto shadow-lg">
+            <Info className="w-10 h-10 text-white" />
+          </div>
+          <h2 className="text-4xl font-serif italic font-bold text-romantic-ink">About my bao2</h2>
+          <p className="text-romantic-ink/60 italic font-medium">A space built with love, for everything we share.</p>
+        </div>
+
+        <div className="grid gap-6">
+          {[
+            {
+              title: "Digital Love Letter",
+              desc: "A timeless letter that grows with our story, accessible whenever you need a reminder.",
+              icon: BookOpen
+            },
+            {
+              title: "Memory Vault",
+              desc: "Capture and preserve our favorite moments together with photos, dates, and voice notes.",
+              icon: ImageIcon
+            },
+            {
+              title: "Shared Atmosphere",
+              desc: "A personalized playlist and mood-based interactions designed for your comfort.",
+              icon: Heart
+            },
+            {
+              title: "Safe & Private",
+              desc: "Everything here is stored locally on your device, just for you.",
+              icon: Lock
+            }
+          ].map((feature, i) => (
+            <motion.div 
+              key={i}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.1 }}
+              className="glass p-6 rounded-[32px] border-2 border-white/50 flex gap-4 items-start"
+            >
+              <div className="p-3 bg-romantic-bg rounded-2xl text-romantic-accent">
+                <feature.icon size={24} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-bold text-romantic-ink">{feature.title}</h3>
+                <p className="text-sm text-romantic-ink/70 leading-relaxed">{feature.desc}</p>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        <div className="text-center pt-8">
+          <p className="text-xs uppercase font-bold tracking-[0.3em] text-romantic-accent opacity-50">
+            Version 2.0 — Forever & Always
+          </p>
+        </div>
+      </div>
+    </PageTransition>
+  );
+
   const renderPage = () => {
     return (
       <Routes>
@@ -823,6 +1716,7 @@ export default function App() {
         <Route path="/secrets" element={<SecretMessagesPage />} />
         <Route path="/daily" element={<DailyMessagePage />} />
         <Route path="/game" element={<MiniGamePage />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/final" element={<FinalPage />} />
         <Route path="*" element={<HomePage />} />
       </Routes>
@@ -830,19 +1724,28 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen relative flex flex-col ${isDarkMode ? 'dark bg-slate-900 text-slate-100' : 'bg-romantic-bg text-romantic-ink'}`}>
+    <div className={`min-h-screen relative flex flex-col transition-colors duration-500 ${isDarkMode ? 'dark bg-slate-900 text-slate-100' : 'bg-romantic-bg text-romantic-ink'}`}>
       <AnimatePresence>
         {showSplash && <Splash />}
       </AnimatePresence>
 
       <FloatingHearts />
-      <audio ref={audioRef} loop src="https://cdn.pixabay.com/audio/2022/05/27/audio_1808f30302.mp3" />
+      {/* Background Music */}
+      <audio 
+        ref={audioRef} 
+        loop 
+        src="https://cdn.pixabay.com/audio/2022/05/27/audio_1808f30302.mp3" 
+        onPlay={() => setIsMusicPlaying(true)}
+        onPause={() => setIsMusicPlaying(false)}
+        onError={() => showToast('Music playback failed. Check your connection.')}
+      />
 
       {/* Global Header */}
       <header className="sticky top-0 z-40 px-6 py-5 flex justify-between items-center glass backdrop-blur-xl border-b-2 border-white/50">
         <button 
           onClick={() => navigate('/')} 
-          className="flex items-center gap-3 text-romantic-ink font-serif italic text-2xl font-bold hover:scale-105 transition-transform"
+          aria-label="Go to Home"
+          className="flex items-center gap-3 text-romantic-ink font-serif italic text-2xl font-bold hover:scale-105 transition-transform focus:outline-none focus:ring-2 focus:ring-romantic-accent rounded-xl"
         >
           <div className="w-10 h-10 bg-romantic-soft rounded-full flex items-center justify-center shadow-sm">
             <Heart fill="white" className="w-5 h-5 text-white" />
@@ -853,7 +1756,8 @@ export default function App() {
           {showInstallBtn && (
             <button 
               onClick={handleInstallClick}
-              className="p-3 rounded-2xl bg-romantic-accent text-white hover:bg-romantic-deep transition-all shadow-lg active:scale-95 flex items-center gap-2 group"
+              aria-label="Install app"
+              className="p-3 rounded-2xl bg-romantic-accent text-white hover:bg-romantic-deep transition-all shadow-lg active:scale-95 flex items-center gap-2 group focus:outline-none focus:ring-2 focus:ring-romantic-accent"
             >
               <Download className="w-5 h-5 group-hover:bounce" />
               <span className="text-[10px] uppercase font-bold tracking-widest hidden sm:inline">Install</span>
@@ -861,13 +1765,15 @@ export default function App() {
           )}
           <button 
             onClick={toggleMusic}
-            className="p-3 rounded-2xl bg-white/40 hover:bg-white/60 text-romantic-accent transition-all shadow-sm active:scale-95"
+            aria-label={isMusicPlaying ? "Pause music" : "Play music"}
+            className="p-3 rounded-2xl bg-white/40 hover:bg-white/60 text-romantic-accent transition-all shadow-sm active:scale-95 focus:outline-none focus:ring-2 focus:ring-romantic-accent"
           >
             {isMusicPlaying ? <Volume2 className="w-5 h-5"/> : <VolumeX className="w-5 h-5"/>}
           </button>
           <button 
             onClick={() => setIsDarkMode(!isDarkMode)}
-            className="p-3 rounded-2xl bg-white/40 hover:bg-white/60 text-romantic-accent transition-all shadow-sm active:scale-95"
+            aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+            className="p-3 rounded-2xl bg-white/40 hover:bg-white/60 text-romantic-accent transition-all shadow-sm active:scale-95 focus:outline-none focus:ring-2 focus:ring-romantic-accent"
           >
             {isDarkMode ? <Sun className="w-5 h-5"/> : <Moon className="w-5 h-5"/>}
           </button>
@@ -897,6 +1803,7 @@ export default function App() {
           { id: 'secrets', icon: Lock, label: 'Secrets' },
           { id: 'daily', icon: Sparkles, label: 'Daily' },
           { id: 'game', icon: Gamepad2, label: 'Game' },
+          { id: 'about', icon: Info, label: 'About' },
         ].map(item => {
           const path = `/${item.id}`;
           const isActive = location.pathname === path;
@@ -904,7 +1811,8 @@ export default function App() {
             <button
               key={item.id}
               onClick={() => navigate(path)}
-              className={`flex flex-col items-center p-3 rounded-[20px] min-w-[70px] transition-all relative ${isActive ? 'bg-romantic-accent text-white scale-110 shadow-lg shadow-romantic-accent/20' : 'text-romantic-ink/60 hover:bg-romantic-soft/20'}`}
+              aria-label={item.label}
+              className={`flex flex-col items-center p-3 rounded-[20px] min-w-[70px] transition-all relative focus:outline-none focus:ring-2 focus:ring-romantic-accent ${isActive ? 'bg-romantic-accent text-white scale-110 shadow-lg shadow-romantic-accent/20' : 'text-romantic-ink/60 hover:bg-romantic-soft/20'}`}
             >
               <item.icon className={`w-5 h-5 ${isActive ? 'animate-pulse' : ''}`} />
               <span className="text-[9px] font-bold uppercase tracking-tighter mt-1">{item.label}</span>
@@ -915,6 +1823,22 @@ export default function App() {
           );
         })}
       </nav>
+
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 bg-romantic-ink/90 backdrop-blur-xl text-white rounded-full font-bold shadow-2xl border border-white/20 flex items-center gap-3"
+          >
+            <div className="w-6 h-6 bg-romantic-accent rounded-full flex items-center justify-center">
+              <Sparkles className="w-3 h-3" />
+            </div>
+            {toast}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

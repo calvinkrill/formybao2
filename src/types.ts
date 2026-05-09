@@ -9,7 +9,10 @@ export interface Memory {
   id: string;
   image: string;
   caption: string;
+  description?: string;
   date: string;
+  filter?: string;
+  voiceNote?: string;
 }
 
 export interface Song {
